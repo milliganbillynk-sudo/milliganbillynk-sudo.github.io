@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2029">
+<title>OMG CRM</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  html, body { margin: 0; height: 100%; background: #12151b; color: #e8eaf0; font: 15px/1.45 system-ui, sans-serif; }
+  iframe { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; }
+  #help { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; background: #12151bf0; }
+  #help .box { max-width: 420px; background: #1c2029; border: 1px solid #2d3240; border-radius: 14px; padding: 20px; }
+  #help h1 { font-size: 18px; margin: 0 0 8px; }
+  #help p { color: #9aa1ae; margin: 0 0 14px; }
+  #help a, #help button { display: block; width: 100%; box-sizing: border-box; margin-top: 8px; padding: 12px; border: 0; border-radius: 10px;
+    background: #6f93f0; color: #0d1220; font: inherit; font-weight: 600; text-align: center; text-decoration: none; cursor: pointer; }
+  #help button.ghost { background: #252c3d; color: #e8eaf0; }
+  #setup { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; background: #12151b; }
+  #setup .box { width: 100%; max-width: 420px; background: #1c2029; border: 1px solid #2d3240; border-radius: 14px; padding: 20px; box-sizing: border-box; }
+  #setup h1 { font-size: 18px; margin: 0 0 8px; }
+  #setup p { color: #9aa1ae; margin: 0 0 14px; }
+  #setup input { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #2d3240; border-radius: 10px; background: #12151b; color: #e8eaf0; font: inherit; }
+  #setup button { display: block; width: 100%; margin-top: 12px; padding: 12px; border: 0; border-radius: 10px; background: #6f93f0; color: #0d1220; font: inherit; font-weight: 600; cursor: pointer; }
+  #urlErr { color: #ff7070; font-size: 13px; margin-top: 8px; min-height: 1em; }
+  /* «На весь экран» — когда страница открыта ярлыком во вкладке браузера (не установлена как приложение) */
+  #fs { position: fixed; left: 0; right: 0; bottom: 0; display: none; flex-direction: column; gap: 8px; padding: 14px 16px 22px;
+    background: linear-gradient(transparent, #12151bf5 30%); }
+  #fs button { width: 100%; padding: 14px; border: 0; border-radius: 12px; font: inherit; font-weight: 600; cursor: pointer; }
+  #fsGo { background: #6f93f0; color: #0d1220; font-size: 16px; }
+  #fsNo { background: #252c3d; color: #e8eaf0; }
+  #fsMini { position: fixed; right: 10px; bottom: 10px; display: none; width: 40px; height: 40px; border: 0; border-radius: 12px;
+    background: #252c3dcc; color: #e8eaf0; font-size: 20px; line-height: 40px; text-align: center; cursor: pointer; padding: 0; }
+</style>
+</head>
+<body>
+<!-- Обёртка: CRM (Google Apps Script) открывается внутри, страница ставится как приложение на весь экран -->
+<iframe id="crm" allow="clipboard-write" referrerpolicy="no-referrer-when-downgrade"></iframe>
+<div id="help"><div class="box">
+  <h1>CRM не загрузилась</h1>
+  <p>Скорее всего, в этом браузере нет входа в Google (аккаунт владельца CRM). Войдите на открывшейся вкладке,
+     вернитесь сюда и нажмите «Обновить».</p>
+  <a id="login" target="_blank" rel="noopener">Войти в Google</a>
+  <button id="retry">Обновить</button>
+  <button class="ghost" id="wait">Подождать ещё</button>
+  <button class="ghost" id="change">Сменить ссылку на CRM</button>
+</div></div>
+<!-- Ссылка на CRM не хранится на сайте: на каждом телефоне её вводят один раз, она запоминается в этом браузере -->
+<div id="setup"><div class="box">
+  <h1>OMG CRM</h1>
+  <p>Вставьте ссылку на CRM (оканчивается на <b>/exec</b>). Она запомнится на этом телефоне.</p>
+  <input id="url" type="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">
+  <div id="urlErr"></div>
+  <button id="saveUrl">Открыть CRM</button>
+</div></div>
+<div id="fs"><button id="fsGo">⛶ На весь экран</button><button id="fsNo">Не сейчас</button></div>
+<button id="fsMini" title="На весь экран">⛶</button>
+<script>
+  // Ссылка на CRM — только в памяти этого браузера (на сайте её нет)
+  const URL_RE = /^https:\/\/script\.google\.com\/(a\/[^/\s]+\/)?macros\/s\/[\w-]+\/exec\/?$/;
+  const getUrl = () => { try { return localStorage.getItem('omgCrmUrl') || ''; } catch (e) { return ''; } };
+  let CRM = getUrl();
+  const frame = document.getElementById('crm'), help = document.getElementById('help'), setup = document.getElementById('setup');
+  let ready = false, timer;
+  function askUrl() {
+    clearTimeout(timer);
+    help.style.display = 'none';
+    frame.removeAttribute('src');
+    document.getElementById('url').value = CRM;
+    document.getElementById('urlErr').textContent = '';
+    setup.style.display = 'flex';
+  }
+  document.getElementById('saveUrl').onclick = () => {
+    const v = document.getElementById('url').value.trim();
+    if (!URL_RE.test(v)) { document.getElementById('urlErr').textContent = 'Ссылка должна начинаться с https://script.google.com/ и оканчиваться на /exec'; return; }
+    try { localStorage.setItem('omgCrmUrl', v); } catch (e) { /* без памяти — только на этот раз */ }
+    CRM = v;
+    setup.style.display = 'none';
+    load();
+    fsUpdate();
+  };
+  document.getElementById('url').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('saveUrl').click(); });
+  document.getElementById('change').onclick = askUrl;
+  // страница CRM сообщает «загрузилась» (Index.html → omgReady); нет сообщения — показываем подсказку про вход
+  window.addEventListener('message', e => {
+    let host = '';
+    try { host = new URL(e.origin).hostname; } catch (err) {}
+    if (e.data && e.data.omgReady && /(^|\.)googleusercontent\.com$/.test(host)) { ready = true; help.style.display = 'none'; }
+  });
+  function load() {
+    if (!CRM) { askUrl(); return; }
+    document.getElementById('login').href = CRM;
+    ready = false; help.style.display = 'none';
+    frame.src = CRM + (CRM.includes('?') ? '&' : '?') + '_r=' + Date.now();
+    clearTimeout(timer);
+    timer = setTimeout(() => { if (!ready) help.style.display = 'flex'; }, 12000);
+  }
+  document.getElementById('retry').onclick = load;
+  document.getElementById('wait').onclick = () => { help.style.display = 'none'; timer = setTimeout(() => { if (!ready) help.style.display = 'flex'; }, 12000); };
+  load();
+
+  // На весь экран из обычной вкладки (Xiaomi и др. не дают установить страницу как приложение).
+  // Касание внутри CRM сюда не доходит (она во вложенной рамке), поэтому — своя кнопка поверх.
+  const fsBox = document.getElementById('fs'), fsMini = document.getElementById('fsMini');
+  // Прячем кнопку только в настоящем полноэкранном режиме (установленное приложение с display: fullscreen).
+  // Ярлык Edge на Xiaomi может называть себя «standalone», хотя адресная строка видна, — там кнопка нужна.
+  const root = document.documentElement;
+  const installed = matchMedia('(display-mode: fullscreen)').matches;
+  const canFs = !!(root.requestFullscreen || root.webkitRequestFullscreen);
+  const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+  let fsAsked = false;   // большую кнопку показываем один раз за запуск, дальше — маленькую в углу
+  function fsUpdate() {
+    const show = canFs && !installed && !fsEl() && setup.style.display !== 'flex';   // не поверх ввода ссылки
+    fsBox.style.display = show && !fsAsked ? 'flex' : 'none';
+    fsMini.style.display = show && fsAsked ? 'block' : 'none';
+  }
+  async function goFull() {
+    fsAsked = true;
+    try { await (root.requestFullscreen ? root.requestFullscreen({ navigationUI: 'hide' }) : root.webkitRequestFullscreen()); }
+    catch (e) { /* браузер не дал */ }
+    fsUpdate();
+  }
+  document.addEventListener('webkitfullscreenchange', () => fsUpdate());
+  document.getElementById('fsGo').onclick = goFull;
+  fsMini.onclick = goFull;
+  document.getElementById('fsNo').onclick = () => { fsAsked = true; fsUpdate(); };
+  document.addEventListener('fullscreenchange', fsUpdate);
+  fsUpdate();
+
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
